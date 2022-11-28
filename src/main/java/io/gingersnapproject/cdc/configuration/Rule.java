@@ -18,5 +18,7 @@ public interface Rule {
       Database database();
 
       Backend backend();
+
+      Indexing indexing();
    }
 }

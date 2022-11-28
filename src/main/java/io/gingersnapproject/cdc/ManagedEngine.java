@@ -13,11 +13,12 @@ import javax.enterprise.context.ApplicationScoped;
 import javax.enterprise.event.Observes;
 import javax.inject.Inject;
 
-import io.gingersnapproject.cdc.cache.CacheService;
-import io.gingersnapproject.cdc.configuration.Rule;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import io.gingersnapproject.cdc.cache.CacheService;
+import io.gingersnapproject.cdc.configuration.Rule;
+import io.gingersnapproject.cdc.search.SearchService;
 import io.quarkus.arc.All;
 import io.quarkus.runtime.ShutdownEvent;
 import io.quarkus.runtime.StartupEvent;
@@ -34,8 +35,19 @@ public class ManagedEngine {
 
    @Inject @All List<CacheService> services;
 
+   @Inject @All List<SearchService> searchServices;
+
     CacheService findCacheService(URI uri) {
       for (CacheService cacheService : services) {
+         if (cacheService.supportsURI(uri)) {
+            return cacheService;
+         }
+      }
+      throw new IllegalArgumentException("Unsupported URI received: " + uri + " ensure service is running if correct!");
+   }
+
+   SearchService findSearchService(URI uri) {
+      for (SearchService cacheService : searchServices) {
          if (cacheService.supportsURI(uri)) {
             return cacheService;
          }
@@ -50,7 +62,8 @@ public class ManagedEngine {
             Rule.SingleRule ruleConfiguration = entry.getValue();
             URI uri = ruleConfiguration.backend().uri();
             CacheService cacheService = findCacheService(uri);
-            EngineWrapper engine = new EngineWrapper(name, ruleConfiguration, cacheService, this);
+            SearchService searchService = findSearchService(uri);
+            EngineWrapper engine = new EngineWrapper(name, ruleConfiguration, cacheService, searchService, this);
             return new StartStopEngine(engine);
          });
          sse.start();

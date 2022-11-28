@@ -21,6 +21,7 @@ import io.gingersnapproject.cdc.connector.DatabaseProvider;
 import io.gingersnapproject.cdc.consumer.BatchConsumer;
 import io.gingersnapproject.cdc.remote.RemoteOffsetStore;
 import io.gingersnapproject.cdc.remote.RemoteSchemaHistory;
+import io.gingersnapproject.cdc.search.SearchService;
 import io.gingersnapproject.cdc.translation.ColumnJsonTranslator;
 import io.gingersnapproject.cdc.translation.ColumnStringTranslator;
 import io.gingersnapproject.cdc.translation.IdentityTranslator;
@@ -39,22 +40,25 @@ public class EngineWrapper {
          new Thread(runnable, "engine"));
    private final String name;
    private final CacheService cacheService;
+   private final SearchService searchService;
    private final ManagedEngine managedEngine;
    private final Rule.SingleRule rule;
    private final Properties properties;
    private volatile DebeziumEngine<ChangeEvent<SourceRecord, SourceRecord>> engine;
 
    private EngineWrapper(String name, Rule.SingleRule rule, Properties properties, CacheService cacheService,
-                         ManagedEngine managedEngine) {
+                         SearchService searchService, ManagedEngine managedEngine) {
       this.name = name;
       this.cacheService = cacheService;
+      this.searchService = searchService;
       this.managedEngine = managedEngine;
       this.rule = rule;
       this.properties = properties;
    }
 
-   public EngineWrapper(String name, Rule.SingleRule rule, CacheService cacheService, ManagedEngine managedEngine) {
-      this(name, rule, defaultProperties(name, rule), cacheService, managedEngine);
+   public EngineWrapper(String name, Rule.SingleRule rule, CacheService cacheService, SearchService searchService,
+                        ManagedEngine managedEngine) {
+      this(name, rule, defaultProperties(name, rule), cacheService, searchService, managedEngine);
    }
 
    private static Properties defaultProperties(String name, Rule.SingleRule rule) {
@@ -95,7 +99,8 @@ public class EngineWrapper {
    }
 
    public void start() {
-      EventProcessingChain chain = EventProcessingChainFactory.create(rule, createCacheBackend(name, rule.backend()));
+      Backends backends = createBackends(name, rule.backend());
+      EventProcessingChain chain = EventProcessingChainFactory.create(rule, backends.cache);
       this.engine = DebeziumEngine.create(Connect.class)
             .using(properties)
             .using(this.getClass().getClassLoader())
@@ -126,7 +131,7 @@ public class EngineWrapper {
       return name;
    }
 
-   private CacheBackend createCacheBackend(String name, Backend backend) {
+   private Backends createBackends(String name, Backend backend) {
       JsonTranslator<?> keyTranslator;
       JsonTranslator<?> valueTranslator = backend.columns().isPresent() ?
             new ColumnJsonTranslator(backend.columns().get()) : IdentityTranslator.getInstance();
@@ -147,6 +152,25 @@ public class EngineWrapper {
             throw new IllegalArgumentException("Key type: " + backend.keyType() + " not supported!");
       }
 
-      return cacheService.backendForURI(backend.uri(), keyTranslator, valueTranslator);
+      CacheBackend cacheBackend = cacheService.backendForURI(backend.uri(), keyTranslator, valueTranslator);
+      return new Backends(cacheBackend, null);
+   }
+
+   private static final class Backends {
+      private CacheBackend cache;
+      private IndexBackend index;
+
+      public Backends(CacheBackend cache, IndexBackend index) {
+         this.cache = cache;
+         this.index = index;
+      }
+
+      public CacheBackend cache() {
+         return cache;
+      }
+
+      public IndexBackend index() {
+         return index;
+      }
    }
 }
